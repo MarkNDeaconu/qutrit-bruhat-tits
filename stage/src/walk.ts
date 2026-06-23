@@ -158,6 +158,28 @@ export function pathEdges(path: string[]): Array<[string, string]> {
   return out;
 }
 
+/**
+ * Reduce a tree walk to its geodesic by removing adjacent backtracks — the same
+ * algorithm the engine uses (vizgen/walks.py `_reduction_schedule`). Returns the
+ * reduced path and the event schedule. Used to straighten a *segment* of the
+ * walk (the path between two pure vertices) independently of the whole trail.
+ */
+export function reducePath(trail: string[]): { geodesic: string[]; events: ReductionEvent[] } {
+  const work = trail.slice();
+  const events: ReductionEvent[] = [];
+  let i = 1;
+  while (i < work.length) {
+    if (i + 1 < work.length && work[i + 1] === work[i - 1]) {
+      events.push({ index: i, removed: [work[i], work[i + 1]] });
+      work.splice(i, 2);
+      i = Math.max(1, i - 1);
+    } else {
+      i++;
+    }
+  }
+  return { geodesic: work, events };
+}
+
 // ---------------------------------------------------------------------------
 // Animation driver (renderer/scrubber accessed through structural ports so
 // this file stays pixi-free and standalone-compilable)
@@ -315,40 +337,53 @@ export class WalkDriver {
     if (s && s.type === 'move') this.stage.maybeFollow(s.to!);
   }
 
-  /** The signature moment: replay the reduction schedule, then the geodesic. */
-  async straighten(): Promise<void> {
+  /**
+   * The signature moment: straighten the PENDING segment `t.trail[fromIndex:]`
+   * into its geodesic and return that geodesic (addresses). Only the pending
+   * meander is retracted/redrawn — the frozen prefix (already-synthesized
+   * geodesics, kept as renderer frozen edges by the caller) is never touched,
+   * so synthesizing after an append does not re-expand earlier work.
+   * fromIndex = 0 is the whole walk (first synthesize / global case).
+   */
+  async straighten(fromIndex = 0): Promise<string[]> {
     const t = this.traj;
-    if (!t) return;
+    if (!t) return [];
     const myGen = ++this.gen;
     this.playing = false;
     this.paused = false;
 
-    const fates = computeTokenFates(t.trail, t.edgeOwner, t.reduction);
-    // make sure the full raw trail is on screen before retracting it
-    this.stage.drawDeepPath(t.trail);
-    this.stage.setTrailEdges(pathEdges(t.trail));
-    this.scrub.setActive(-1);
-    this.scrub.setMeter(fates.hCount, t.sde);
-    await sleep(350);
-    if (myGen !== this.gen) return;
+    const seg = t.trail.slice(fromIndex);
+    if (seg.length < 2) return seg; // nothing pending (segment is sde 0)
 
-    const work = t.trail.slice();
+    const anchorH = fromIndex / 2; // H's frozen before this segment (trail: 2 verts per H)
+    const segOwners = t.edgeOwner.slice(fromIndex).map((o) => o - anchorH); // local ordinals
+    const { geodesic: segGeo, events } = reducePath(seg);
+    const fates = computeTokenFates(seg, segOwners, events);
+    const segSde = (segGeo.length - 1) / 2;
+
+    this.stage.drawDeepPath(seg);
+    this.stage.setTrailEdges(pathEdges(seg)); // active = the pending meander
+    this.scrub.setActive(-1);
+    this.scrub.setMeter(fates.hCount, segSde);
+    await sleep(300);
+    if (myGen !== this.gen) return segGeo;
+
+    const work = seg.slice();
     const lobeMs = Math.min(Math.max(this.msPerStep * 0.8, 180), 480);
     for (const ev of fates.events) {
       await this.pauseGate(myGen);
-      if (myGen !== this.gen) return;
+      if (myGen !== this.gen) return segGeo;
       await this.stage.flashLobe(ev.lobe, lobeMs);
-      if (myGen !== this.gen) return;
+      if (myGen !== this.gen) return segGeo;
       work.splice(ev.index, 2);
       this.stage.setTrailEdges(pathEdges(work));
       for (const h of ev.halved) this.scrub.onTokenHalf(h);
       for (const h of ev.died) this.scrub.onTokenDead(h);
-      this.scrub.setMeter(ev.survivingEdges / 2, t.sde);
+      this.scrub.setMeter(ev.survivingEdges / 2, segSde);
     }
-    // play a pulse following the synthesized path, origin → green endpoint
-    await this.stage.tracePath(t.geodesic, 280);
-    if (myGen !== this.gen) return;
-    if (this.onStraightenDone) this.onStraightenDone(t.sde);
+    // pulse following the synthesized segment, anchor → green endpoint (camera follows)
+    await this.stage.tracePath(segGeo, 280);
+    return segGeo;
   }
 
   cancel(): void {

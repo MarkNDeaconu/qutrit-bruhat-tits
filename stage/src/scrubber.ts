@@ -10,8 +10,9 @@ export class Scrubber implements ScrubPort {
   private tokensEl: HTMLElement;
   private meterEl: HTMLElement;
   private tokens: HTMLElement[] = [];
-  private hToToken: number[] = []; // H ordinal -> token index
+  private hToToken: number[] = []; // (pending) H ordinal -> token index
   private activeIdx = -1;
+  private locked = 0; // H's already frozen in synthesized segments
 
   onScrub: ((step: number) => void) | null = null;
 
@@ -27,18 +28,18 @@ export class Scrubber implements ScrubPort {
     this.meterEl = root.querySelector('#scrub-meter')!;
   }
 
-  /** One token per letter (from traj.steps, which covers matrix input too). */
-  build(traj: Trajectory): void {
+  /** One token per letter of the PENDING segment (traj.steps from `fromStep`). */
+  build(traj: Trajectory, fromStep = 0): void {
     this.root.classList.remove('empty');
     this.tokensEl.innerHTML = '';
     this.tokens = [];
     this.hToToken = [];
     this.activeIdx = -1;
-    traj.steps.forEach((s, i) => {
+    traj.steps.slice(fromStep).forEach((s, i) => {
       const el = document.createElement('button');
       const letter = s.letter.toUpperCase();
       el.className = `tok tok-${letter.toLowerCase()}`;
-      el.title = `${letter} — step ${i + 1}`;
+      el.title = letter;
       el.textContent = letter === 'H' ? 'H' : '';
       el.addEventListener('click', () => {
         if (this.onScrub) this.onScrub(i);
@@ -50,12 +51,29 @@ export class Scrubber implements ScrubPort {
     this.setMeter(this.hToToken.length, null);
   }
 
+  /** H's locked into already-synthesized segments (shown alongside pending). */
+  setLocked(n: number): void {
+    this.locked = n;
+    this.setMeter(this.hToToken.length, null);
+  }
+
+  /** Drop the pending tokens once the segment has been frozen. */
+  clearPending(): void {
+    this.tokensEl.innerHTML = '';
+    this.tokens = [];
+    this.hToToken = [];
+    this.activeIdx = -1;
+    this.root.classList.toggle('empty', this.locked === 0);
+    this.setMeter(0, null);
+  }
+
   clear(): void {
     this.root.classList.add('empty');
     this.tokensEl.innerHTML = '';
     this.tokens = [];
     this.hToToken = [];
     this.activeIdx = -1;
+    this.locked = 0;
     this.meterEl.textContent = '';
   }
 
@@ -91,12 +109,17 @@ export class Scrubber implements ScrubPort {
     this.activeIdx = -1;
   }
 
-  /** Optimality meter: 'H letters: w → optimal: n', counting down live. */
+  /** Meter: 'locked M H · pending w → optimal n', counting down live. */
   setMeter(currentH: number, optimal: number | null): void {
-    if (optimal === null) {
-      this.meterEl.innerHTML = `H letters: <b>${currentH}</b>`;
-    } else {
-      this.meterEl.innerHTML = `H letters: <b>${currentH}</b> &nbsp;→&nbsp; optimal: <b>${optimal}</b>`;
+    const parts: string[] = [];
+    if (this.locked > 0) parts.push(`locked <b>${this.locked}</b> H`);
+    if (currentH > 0 || optimal !== null) {
+      parts.push(
+        optimal === null
+          ? `pending <b>${currentH}</b> H`
+          : `pending <b>${currentH}</b> &nbsp;→&nbsp; optimal <b>${optimal}</b>`,
+      );
     }
+    this.meterEl.innerHTML = parts.join(' &nbsp;·&nbsp; ') || '&nbsp;';
   }
 }

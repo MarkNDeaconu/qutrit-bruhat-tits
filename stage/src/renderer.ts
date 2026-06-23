@@ -141,7 +141,8 @@ export class Renderer implements StagePort {
   private introDone = false;
   private lodCutoff = Infinity;
 
-  private trailEdges: Array<[string, string]> = [];
+  private trailEdges: Array<[string, string]> = []; // active (pending) meander
+  private frozenTrailEdges: Array<[string, string]> = []; // synthesized geodesics
   private selectedAddr: string | null = null;
   private endpointAddr: string | null = null;
 
@@ -341,11 +342,16 @@ export class Renderer implements StagePort {
     });
   }
 
-  resetCamera(durationMs = 700): Promise<void> {
+  /** Reset zoom and glide the camera to centre `addr`. */
+  recenterOn(addr: string, durationMs = 700): Promise<void> {
     this.zoom = 1;
     this.applyWorldTransform();
     this.updateLod();
-    return this.focusOn('', durationMs);
+    return this.focusOn(addr, durationMs);
+  }
+
+  resetCamera(durationMs = 700): Promise<void> {
+    return this.recenterOn('', durationMs);
   }
 
   // -- drawing ----------------------------------------------------------------
@@ -413,8 +419,10 @@ export class Renderer implements StagePort {
   private redrawTrail(): void {
     const g = this.trailG;
     g.clear();
-    if (this.trailEdges.length === 0) return;
-    const polys = this.trailEdges.map(([a, b]) => this.edgePolylinePx(a, b));
+    // frozen (already-synthesized geodesics) + active (current pending meander)
+    const all = this.frozenTrailEdges.concat(this.trailEdges);
+    if (all.length === 0) return;
+    const polys = all.map(([a, b]) => this.edgePolylinePx(a, b));
     const c = this.theme.trail;
     // layered strokes: wide low-alpha under narrow high-alpha = cheap bloom
     this.strokeTrailPass(g, polys, 9, 0.14, c);
@@ -443,6 +451,22 @@ export class Renderer implements StagePort {
   clearTrail(): void {
     this.trailEdges = [];
     this.liveTrailG.clear();
+    this.redrawTrail();
+  }
+
+  /** Frozen geodesics = the parts already synthesized; they persist across
+   *  appends and further synthesizes (never re-expanded). */
+  addFrozenEdges(edges: Array<[string, string]>): void {
+    for (const [a, b] of edges) {
+      this.ensureVertex(a);
+      this.ensureVertex(b);
+    }
+    this.frozenTrailEdges.push(...edges);
+    this.redrawTrail();
+  }
+
+  clearFrozen(): void {
+    this.frozenTrailEdges = [];
     this.redrawTrail();
   }
 

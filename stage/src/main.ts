@@ -9,7 +9,7 @@ import { runMathChecks } from './hyperbolic.js';
 import { Renderer } from './renderer.js';
 import { Scrubber } from './scrubber.js';
 import { Inspector } from './inspector.js';
-import { WalkDriver, type Trajectory } from './walk.js';
+import { WalkDriver, pathEdges, type Trajectory } from './walk.js';
 import {
   apiWalk,
   apiRandomWord,
@@ -29,6 +29,7 @@ const NOTES = {
   append: `Appended from the <b style="color:#2ee36e">green node</b>: the walk continues along the same path. The endpoint is U·e₀ for the full accumulated word. <span class="badge proved">proved</span>`,
   oracle: `The <b style="color:#2ee36e">green node</b> marks U·e₀. Watch the 12 candidates at each step: exactly one descends. It always does — we checked every step. <span class="badge verified">machine-verified: 690/690</span>`,
   straighten: `Same endpoint, shortest route: the geodesic from e₀ to the <b style="color:#2ee36e">green node</b> is the optimal circuit. Circuit optimization is path straightening — and the tree counts H, the denominator gate (Clifford), not non-Clifford gates. <span class="badge verified">machine-verified</span>`,
+  incremental: `Each appended segment is synthesized from where the last one ended — already-clean parts stay frozen. The committed circuit is the concatenation of per-segment-optimal geodesics. <span class="badge proved">proved</span>`,
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -124,18 +125,23 @@ async function boot(): Promise<void> {
   const statusEl = document.getElementById('engine-status')!;
 
   let light = false;
-  // accumulated word state: `committed` is the full current word; Play replaces
-  // it (fresh from the origin), Append extends it (continuing from the green
-  // endpoint). matrixMode disables append (a pasted matrix has no word suffix).
-  let committed = '';
+  // Incremental synthesis state. `anchorWord` is the already-synthesized prefix
+  // (frozen on screen as clean geodesics); `pendingWord` is the appended,
+  // not-yet-synthesized suffix (the active meander). committed = anchor+pending.
+  // Play replaces everything from the origin; Append extends pending; Synthesize
+  // freezes the pending meander into a geodesic and advances the anchor — so an
+  // already-synthesized part never reverts or re-expands. matrixMode disables
+  // append (a pasted matrix has no word suffix).
+  let anchorWord = '';
+  let pendingWord = '';
   let matrixMode = false;
+  let matrixDone = false;
+  let lockedH = 0; // H's in the frozen geodesics (= sum of segment sde)
+  let segCount = 0; // number of synthesized segments
+  const committedWord = (): string => anchorWord + pendingWord;
+  const countH = (w: string): number => (w.match(/H/g) || []).length;
 
   // -- wiring ----------------------------------------------------------------
-
-  scrubber.onScrub = (i) => {
-    hideBanner();
-    driver.jumpTo(i);
-  };
 
   renderer.onVertexClick = (addr) => {
     renderer.selectVertex(addr);
@@ -144,10 +150,6 @@ async function boot(): Promise<void> {
   renderer.onVertexDblClick = (addr) => void renderer.focusOn(addr, 700);
   inspector.onClose = () => renderer.selectVertex(null);
 
-  driver.onStraightenDone = (sde) => {
-    showBanner(`H-count = distance/2 = sde = ${sde}`);
-    setCaption(NOTES.straighten);
-  };
   // when a walk finishes, mark the vertex it landed on with the green endpoint
   driver.onPlayDone = () => {
     setCaption(NOTES.oracle);
@@ -170,7 +172,7 @@ async function boot(): Promise<void> {
     wordInput.value = cleaned;
   });
 
-  // Play: start fresh from the origin with `word` as the whole circuit.
+  // Play: wipe everything and start fresh from the origin with `word`.
   async function playWord(word: string): Promise<void> {
     if (!/^[HSR]+$/.test(word)) {
       toast('word must be non-empty letters H, S, R');
@@ -178,25 +180,32 @@ async function boot(): Promise<void> {
     }
     hideBanner();
     renderer.setEndpoint(null);
+    renderer.clearFrozen();
     const traj = await postWalk({ word });
     if (!traj) return;
-    committed = word;
+    anchorWord = '';
+    pendingWord = word;
     matrixMode = false;
-    driver.load(traj);
-    scrubber.build(traj);
+    matrixDone = false;
+    lockedH = 0;
+    segCount = 0;
+    driver.load(traj); // clears the active trail
+    scrubber.setLocked(0);
+    scrubber.build(traj); // pending = the whole word
     setCaption(NOTES.walk);
     void renderer.resetCamera(450); // back to the origin, then walk out
     wordInput.value = '';
     void driver.play();
   }
 
-  // Append: continue from the green endpoint, adding `seg` to the current word.
+  // Append: continue from the green endpoint (the current anchor/endpoint),
+  // adding `seg` to the pending segment. Frozen (synthesized) parts are untouched.
   async function appendWord(seg: string): Promise<void> {
     if (matrixMode) {
       toast('append needs a word — press Play with H, S, R first');
       return;
     }
-    if (!committed) {
+    if (!committedWord()) {
       await playWord(seg); // nothing to append to yet → behave like Play
       return;
     }
@@ -206,58 +215,99 @@ async function boot(): Promise<void> {
     }
     hideBanner();
     renderer.setEndpoint(null);
-    const oldLen = committed.length; // one walk step per letter
-    const newWord = committed + seg;
+    const oldLen = committedWord().length; // one walk step per letter
+    const newWord = committedWord() + seg;
     const traj = await postWalk({ word: newWord });
-    if (!traj) return; // committed unchanged on failure
-    committed = newWord;
-    driver.load(traj, true); // keep the on-screen path (meander OR synthesized geodesic)
-    scrubber.build(traj);
+    if (!traj) return; // state unchanged on failure
+    pendingWord = pendingWord + seg;
+    driver.load(traj, true); // keep frozen geodesics + the active meander on screen
+    scrubber.build(traj, anchorWord.length); // pending-scoped tokens
     setCaption(NOTES.append);
     wordInput.value = '';
-    // keepTrail: extend whatever path is shown (e.g. the synthesized geodesic)
-    // from the green endpoint, rather than snapping back to the meander prefix
+    // keepTrail: extend the active meander from the current endpoint; never
+    // touch the frozen (already-synthesized) prefix
     void driver.play(oldLen, true);
   }
 
   async function playMatrix(rows: string[][]): Promise<void> {
     hideBanner();
     renderer.setEndpoint(null);
+    renderer.clearFrozen();
     const traj = await postWalk({ matrix: rows });
     if (!traj) return;
     wordInput.value = '';
-    committed = '';
+    anchorWord = '';
+    pendingWord = '';
     matrixMode = true;
+    matrixDone = false;
+    lockedH = 0;
+    segCount = 0;
     driver.load(traj);
+    scrubber.setLocked(0);
     scrubber.build(traj);
     setCaption(NOTES.walk);
     void renderer.resetCamera(450);
     void driver.play();
   }
 
-  // Synthesize: snap back to the origin and draw the shortest tree path to the
-  // (already-marked) green endpoint — same destination, optimal route.
+  // Synthesize: straighten ONLY the pending segment into its geodesic, freeze it,
+  // and advance the anchor. Already-synthesized parts stay frozen (no re-expand,
+  // no revert), so alternating append/synthesize builds the circuit incrementally.
   async function synthesize(): Promise<void> {
     if (!driver.trajectory) {
-      const word = committed || wordInput.value.trim();
+      const word = committedWord() || wordInput.value.trim();
       if (!word) {
         toast('type a word (or pick an example) first');
         return;
       }
       const traj = await postWalk({ word });
       if (!traj) return;
-      committed = word;
+      anchorWord = '';
+      pendingWord = word;
       matrixMode = false;
+      matrixDone = false;
+      lockedH = 0;
+      segCount = 0;
       driver.load(traj);
+      scrubber.setLocked(0);
       scrubber.build(traj);
     }
+    if (matrixMode && matrixDone) return; // a matrix has no further segments
+    if (!matrixMode && !pendingWord) return; // nothing new to synthesize
+
     const t = driver.trajectory!;
-    const end = t.geodesic[t.geodesic.length - 1] ?? '';
-    renderer.setEndpoint(end); // the green node the geodesic reaches
+    const fromIndex = matrixMode ? 0 : 2 * countH(anchorWord);
+    const anchorAddr = t.trail[fromIndex] ?? '';
+    const G = t.trail[t.trail.length - 1];
+    renderer.setEndpoint(G);
     hideBanner();
-    setCaption(NOTES.straighten);
-    await renderer.resetCamera(700); // start back at the origin
-    await driver.straighten();
+    setCaption(segCount > 0 ? NOTES.incremental : NOTES.straighten);
+
+    await renderer.recenterOn(anchorAddr, 700); // centre where this segment starts
+    const segGeo = await driver.straighten(fromIndex);
+
+    if (segGeo.length >= 2) renderer.addFrozenEdges(pathEdges(segGeo));
+    renderer.setTrailEdges([]); // the segment is now frozen; clear the active meander
+
+    const segSde = Math.max(0, (segGeo.length - 1) / 2);
+    lockedH += segSde;
+    segCount += 1;
+    scrubber.setLocked(lockedH);
+    scrubber.clearPending();
+
+    if (matrixMode) {
+      matrixDone = true;
+    } else {
+      anchorWord = committedWord();
+      pendingWord = '';
+    }
+
+    if (segCount === 1) {
+      showBanner(`H-count = distance/2 = sde = ${lockedH}`);
+    } else {
+      showBanner(`circuit H-count = ${lockedH} (built in ${segCount} optimal pieces)`);
+    }
+    setCaption(segCount > 1 ? NOTES.incremental : NOTES.straighten);
   }
 
   async function random40(): Promise<void> {
@@ -279,12 +329,17 @@ async function boot(): Promise<void> {
   function clearAll(): void {
     driver.cancel();
     renderer.clearTrail();
+    renderer.clearFrozen();
     renderer.setEndpoint(null);
     renderer.selectVertex(null);
     scrubber.clear();
     hideBanner();
-    committed = '';
+    anchorWord = '';
+    pendingWord = '';
     matrixMode = false;
+    matrixDone = false;
+    lockedH = 0;
+    segCount = 0;
     setCaption(NOTES.idle);
   }
 

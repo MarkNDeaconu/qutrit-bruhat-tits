@@ -89,6 +89,37 @@ try {
   check('Synthesize showed the optimality banner', banner.shown && /sde/.test(banner.text),
     `"${banner.text.trim()}"`);
 
+  // 4b. incremental: append + synthesize repeatedly — each must add a piece and
+  //     NOT revert/re-expand (banner reports growing "optimal pieces")
+  const waitBanner = async (re) => {
+    await page.waitForFunction(
+      (src) => {
+        const b = document.querySelector('#banner');
+        return !!b && b.classList.contains('show') && new RegExp(src).test(b.textContent || '');
+      },
+      re.source,
+      { timeout: 30000 },
+    );
+    return (await page.textContent('#banner')) || '';
+  };
+  let incrementalOk = true;
+  let lastBanner = '';
+  for (const piece of [2, 3]) {
+    await page.fill('#word', 'HSRH');
+    await page.click('#btn-append');
+    await page.waitForTimeout(2200); // let the appended segment walk in
+    await page.click('#btn-synth');
+    try {
+      lastBanner = await waitBanner(new RegExp(`${piece} optimal pieces`));
+    } catch {
+      incrementalOk = false;
+      lastBanner = (await page.textContent('#banner')) || '(timeout)';
+      break;
+    }
+  }
+  check('append+synthesize builds incrementally (no revert/re-expand)', incrementalOk,
+    `"${lastBanner.trim()}"`);
+
   // 5. inspector: click the origin card via the API-backed path
   const vertexOk = await page.evaluate(async () => {
     // exercise the transport directly the way the inspector does

@@ -184,7 +184,7 @@ html, body {
 #scrubber {
   position: fixed;
   left: 0; right: 0;
-  bottom: 52px;
+  bottom: 0;
   display: flex;
   align-items: center;
   gap: 14px;
@@ -279,7 +279,7 @@ html, body {
   position: fixed;
   top: 64px;
   right: 0;
-  bottom: 110px;
+  bottom: 60px;
   width: 360px;
   max-width: 92vw;
   background: var(--panel);

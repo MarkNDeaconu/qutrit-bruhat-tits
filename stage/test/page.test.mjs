@@ -62,7 +62,7 @@ try {
 
   // 4. drive a walk: fast animation speed, type a scenic word, Play, Synthesize
   await page.$eval('#speed', (el) => {
-    el.value = '120';
+    el.value = '1200'; // max = fastest (slider is inverted: right = fast)
     el.dispatchEvent(new Event('input', { bubbles: true }));
   });
   await page.fill('#word', 'HSHHRHRSHRHRRHRRHHHHSHHHHSSHHR');
@@ -139,7 +139,9 @@ try {
   let cutoffShown = false;
   try {
     await page.waitForFunction(
-      () => /rendered range|red node/.test(document.querySelector('#caption')?.textContent || ''),
+      () => /beyond the visualizer|red edge/.test(
+        document.querySelector('#toast-holder')?.textContent || '',
+      ),
       { timeout: 30000 },
     );
     cutoffShown = true;
@@ -147,7 +149,7 @@ try {
     /* notice never appeared */
   }
   check('deep path cuts off with an out-of-range notice (no glitch)', cutoffShown,
-    ((await page.textContent('#caption')) || '').trim().slice(0, 70));
+    ((await page.textContent('#toast-holder')) || '').trim().slice(0, 70));
   await page.waitForTimeout(1500); // let any (now-bounded) animation settle
   await page.screenshot({ path: '/tmp/qutrits_cutoff.png', fullPage: false });
 

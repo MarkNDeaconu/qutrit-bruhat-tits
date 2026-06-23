@@ -51,7 +51,9 @@ function toast(msg: string): void {
 }
 
 function setCaption(html: string): void {
-  document.getElementById('caption')!.innerHTML = html;
+  // The bottom field-note strip was removed; keep the calls as harmless no-ops.
+  const el = document.getElementById('caption');
+  if (el) el.innerHTML = html;
 }
 
 function showBanner(text: string): void {
@@ -124,7 +126,6 @@ async function boot(): Promise<void> {
 
   const wordInput = document.getElementById('word') as HTMLInputElement;
   const speedInput = document.getElementById('speed') as HTMLInputElement;
-  const examplesSel = document.getElementById('examples') as HTMLSelectElement;
   const statusEl = document.getElementById('engine-status')!;
 
   let light = false;
@@ -166,10 +167,14 @@ async function boot(): Promise<void> {
     toast(CUTOFF_MSG);
   };
 
-  driver.msPerStep = Number(speedInput.value);
-  speedInput.addEventListener('input', () => {
-    driver.msPerStep = Number(speedInput.value);
-  });
+  // Slider is a SPEED control: dragging right (higher value) = faster = fewer
+  // ms/step. Invert the range so the slider reads left=slow, right=fast.
+  const SPEED_SUM = 1320; // min(120) + max(1200)
+  const applySpeed = () => {
+    driver.msPerStep = SPEED_SUM - Number(speedInput.value);
+  };
+  applySpeed();
+  speedInput.addEventListener('input', applySpeed);
 
   // live validation: letters HSR only, uppercased as you type
   wordInput.addEventListener('input', () => {
@@ -383,20 +388,6 @@ async function boot(): Promise<void> {
   document.getElementById('btn-random')!.addEventListener('click', () => void random20());
   document.getElementById('btn-clifford')!.addEventListener('click', () => void randomClifford());
   document.getElementById('btn-clear')!.addEventListener('click', clearAll);
-
-  examplesSel.addEventListener('change', () => {
-    const v = examplesSel.value;
-    examplesSel.selectedIndex = 0;
-    if (!v) return;
-    if (v === '__random20__') {
-      void random20();
-    } else if (v === '__clifford__') {
-      void randomClifford();
-    } else {
-      wordInput.value = v;
-      void playWord(v);
-    }
-  });
 
   // -- matrix modal ------------------------------------------------------------
 

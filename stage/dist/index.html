@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>The Tree Behind the Gates — qutrit Clifford+R on its Bruhat–Tits tree</title>
+    <script type="module" crossorigin src="./assets/index-B2mqHGqO.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-DVzgtv6a.css">
+  </head>
+  <body>
+    <div id="stage"></div>
+
+    <div id="splash" class="hidden">
+      <div id="splash-card">
+        <div id="splash-title">The Tree Behind the Gates</div>
+        <div id="splash-sub">qutrit Clifford+R synthesis on its Bruhat–Tits tree</div>
+        <div id="splash-spinner"></div>
+        <div id="splash-status">starting…</div>
+        <div id="splash-foot">running the verified arithmetic in your browser
+          <span class="badge verified">exact · machine-verified</span></div>
+      </div>
+    </div>
+
+    <header id="topbar">
+      <span id="title">The Tree Behind the Gates</span>
+      <input id="word" type="text" spellcheck="false" autocomplete="off"
+             placeholder="word in H, S, R — Play (fresh) · Append (continue)" />
+      <button id="btn-play" title="play a fresh walk from the origin (Enter / Space)">Play</button>
+      <button id="btn-append" title="continue from the green endpoint (A / Shift+Enter)">Append</button>
+      <button id="btn-synth" title="snap to origin, draw the shortest path to the green node (G)">Synthesize</button>
+      <button id="btn-random" title="random length-40 word (R)">Random 40</button>
+      <button id="btn-matrix" title="paste an exact matrix">Matrix…</button>
+      <button id="btn-clear" title="clear trail and timeline">Clear</button>
+      <select id="examples" title="curated examples — scenic routes that collapse to a short geodesic">
+        <option value="">examples…</option>
+        <option value="RHRHHHHRHHHSHRHHHHRHHHSSHHRRHHHHRRRHSSRSRRSSRRH">scenic ⤳ collapses to 2 edges</option>
+        <option value="HSHHRHRSHRHRRHRRHHHHSHHHHSSHHR">scenic ⤳ collapses to 3 edges</option>
+        <option value="SHSRHHRRHSHRHHHHRHHHHRRHHHRHHHHRSSHHRSHRHS">scenic ⤳ collapses to 4 edges</option>
+        <option value="SSHRHSHHHHSSRHHHHRHRHSHRSSSHHHHHHHHHHHHHHHHSSHRHHHHRHHHSSSSR">deep spike ⤳ sde 2</option>
+        <option value="HRHRHHRHRHHHSSSHHHHHHHHHRHHHRHHSSHHHHHHHHSSSSSSRRSSSSHRHSHHHHHHHHSS">deep spike ⤳ sde 4</option>
+        <option value="HSHHHSH">T = HSHHHSH (the hidden monomial, sde 0)</option>
+        <option value="H">H (one step)</option>
+        <option value="__random40__">random 40</option>
+      </select>
+      <label id="speed-label">speed
+        <input id="speed" type="range" min="120" max="1200" step="10" value="550" />
+      </label>
+      <span id="engine-status" class="offline">engine: …</span>
+    </header>
+
+    <div id="legend">
+      <span><i class="dot dot-pure"></i> pure</span>
+      <span><i class="dot dot-alt"></i> alternating</span>
+      <span><i class="dot dot-origin"></i> origin e₀</span>
+      <span><i class="dot dot-rim"></i> rim = Cantor set of ends</span>
+    </div>
+
+    <div id="banner"></div>
+    <aside id="inspector"></aside>
+    <div id="scrubber"></div>
+    <div id="caption"></div>
+    <div id="toast-holder"></div>
+
+    <div id="modal" class="hidden">
+      <div id="modal-card">
+        <h3>Paste an exact matrix in U₃(ℤ[ω,1/3])</h3>
+        <p class="muted">3 lines × 3 entries (comma or space separated); entries like
+          <code>0</code>, <code>w</code>, <code>(1+2w)/3</code>. Membership is validated
+          exactly by the engine — one exact test.</p>
+        <textarea id="matrix-text" rows="3" spellcheck="false"
+          placeholder="0, 0, w&#10;0, 1, 0&#10;w, 0, 0"></textarea>
+        <div class="modal-buttons">
+          <button id="modal-go">Walk it</button>
+          <button id="modal-cancel">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+  </body>
+</html>

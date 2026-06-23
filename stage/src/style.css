@@ -97,6 +97,7 @@ html, body {
 #btn-synth { border-color: var(--gold); color: var(--gold); font-weight: 600; }
 #btn-append { border-color: var(--endpoint); color: var(--endpoint); font-weight: 600; }
 #btn-append:hover { border-color: var(--endpoint); box-shadow: 0 0 0 1px var(--endpoint); }
+#btn-clifford { border-color: var(--accent-alt); color: var(--accent-alt); }
 
 #examples {
   font-size: 15px;

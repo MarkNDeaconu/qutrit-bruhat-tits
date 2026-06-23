@@ -30,7 +30,10 @@ const NOTES = {
   oracle: `The <b style="color:#2ee36e">green node</b> marks U·e₀. Watch the 12 candidates at each step: exactly one descends. It always does — we checked every step. <span class="badge verified">machine-verified: 690/690</span>`,
   straighten: `Same endpoint, shortest route: the geodesic from e₀ to the <b style="color:#2ee36e">green node</b> is the optimal circuit. Circuit optimization is path straightening — and the tree counts H, the denominator gate (Clifford), not non-Clifford gates. <span class="badge verified">machine-verified</span>`,
   incremental: `Each appended segment is synthesized from where the last one ended — already-clean parts stay frozen. The committed circuit is the concatenation of per-segment-optimal geodesics. <span class="badge proved">proved</span>`,
+  cutoff: `The tree is infinite — this circuit runs past the radius this flat view can draw exactly. The <b style="color:#ff5a5a">red node</b> marks where it leaves the rendered range.`,
 } as const;
+
+const CUTOFF_MSG = 'This path runs beyond the visualizer’s range — shown out to the red edge marker.';
 
 // ---------------------------------------------------------------------------
 
@@ -155,6 +158,12 @@ async function boot(): Promise<void> {
     setCaption(NOTES.oracle);
     const t = driver.trajectory;
     if (t && t.trail.length > 0) renderer.setEndpoint(t.trail[t.trail.length - 1]);
+  };
+  // a walk that runs past the renderable range stops at a red "out of range" node
+  driver.onCutoff = (addr) => {
+    renderer.setEndpoint(addr, true);
+    setCaption(NOTES.cutoff);
+    toast(CUTOFF_MSG);
   };
 
   driver.msPerStep = Number(speedInput.value);
@@ -284,7 +293,17 @@ async function boot(): Promise<void> {
     setCaption(segCount > 0 ? NOTES.incremental : NOTES.straighten);
 
     await renderer.recenterOn(anchorAddr, 700); // centre where this segment starts
-    const segGeo = await driver.straighten(fromIndex);
+    const { geodesic: segGeo, cut } = await driver.straighten(fromIndex);
+
+    if (cut) {
+      // the path runs past the renderable range — show it out to a red marker and
+      // leave the incremental state unchanged (this segment isn't fully synthesized)
+      renderer.setTrailEdges(segGeo.length >= 2 ? pathEdges(segGeo) : []);
+      renderer.setEndpoint(segGeo[segGeo.length - 1] ?? anchorAddr, true);
+      setCaption(NOTES.cutoff);
+      toast(CUTOFF_MSG);
+      return;
+    }
 
     if (segGeo.length >= 2) renderer.addFrozenEdges(pathEdges(segGeo));
     renderer.setTrailEdges([]); // the segment is now frozen; clear the active meander
@@ -310,10 +329,10 @@ async function boot(): Promise<void> {
     setCaption(segCount > 1 ? NOTES.incremental : NOTES.straighten);
   }
 
-  async function random40(): Promise<void> {
+  async function random20(): Promise<void> {
     try {
       const seed = Math.floor(Math.random() * 1e6);
-      const data = (await apiRandomWord(40, seed)) as { word?: string };
+      const data = (await apiRandomWord(20, seed)) as { word?: string };
       if (!data.word) throw new Error('bad response');
       wordInput.value = data.word;
       await playWord(data.word);
@@ -326,6 +345,16 @@ async function boot(): Promise<void> {
     }
   }
 
+  // A random Clifford word uses H and S only. ⟨H,S⟩ is the finite Clifford group
+  // (order 1296), so the orbit is bounded — these never run out of range. The
+  // word is plain input (no arithmetic), so it's generated client-side.
+  async function randomClifford(): Promise<void> {
+    let w = '';
+    for (let i = 0; i < 20; i++) w += Math.random() < 0.5 ? 'H' : 'S';
+    wordInput.value = w;
+    await playWord(w);
+  }
+
   function clearAll(): void {
     driver.cancel();
     renderer.clearTrail();
@@ -334,6 +363,7 @@ async function boot(): Promise<void> {
     renderer.selectVertex(null);
     scrubber.clear();
     hideBanner();
+    void renderer.resetCamera(600); // glide the view back to the origin
     anchorWord = '';
     pendingWord = '';
     matrixMode = false;
@@ -350,15 +380,18 @@ async function boot(): Promise<void> {
     void appendWord(wordInput.value.trim());
   });
   document.getElementById('btn-synth')!.addEventListener('click', () => void synthesize());
-  document.getElementById('btn-random')!.addEventListener('click', () => void random40());
+  document.getElementById('btn-random')!.addEventListener('click', () => void random20());
+  document.getElementById('btn-clifford')!.addEventListener('click', () => void randomClifford());
   document.getElementById('btn-clear')!.addEventListener('click', clearAll);
 
   examplesSel.addEventListener('change', () => {
     const v = examplesSel.value;
     examplesSel.selectedIndex = 0;
     if (!v) return;
-    if (v === '__random40__') {
-      void random40();
+    if (v === '__random20__') {
+      void random20();
+    } else if (v === '__clifford__') {
+      void randomClifford();
     } else {
       wordInput.value = v;
       void playWord(v);
@@ -437,7 +470,11 @@ async function boot(): Promise<void> {
         break;
       case 'r':
       case 'R':
-        void random40();
+        void random20();
+        break;
+      case 'c':
+      case 'C':
+        void randomClifford();
         break;
       case '0':
         void renderer.resetCamera(700);

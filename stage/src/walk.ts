@@ -8,6 +8,20 @@
  */
 
 // ---------------------------------------------------------------------------
+// Rendering cap
+// ---------------------------------------------------------------------------
+
+/**
+ * Maximum vertex depth the Poincaré renderer stays numerically exact at. The
+ * disk coordinate is tanh(depth·ln3/2), which saturates toward the rim — beyond
+ * ~depth 18 float64 loses the precision the Möbius camera needs and the
+ * animation glitches. Paths past this are cut off (red marker + a notice).
+ * Normal use stays well under it: random-20 peaks near depth 12, and every
+ * Clifford (H,S-only) word stays at depth 2.
+ */
+export const MAX_DEPTH = 16;
+
+// ---------------------------------------------------------------------------
 // Contract types (subset the stage consumes)
 // ---------------------------------------------------------------------------
 
@@ -219,6 +233,7 @@ export class WalkDriver {
 
   onStraightenDone: ((sde: number) => void) | null = null;
   onPlayDone: (() => void) | null = null;
+  onCutoff: ((addr: string) => void) | null = null; // walk left the renderable range
 
   constructor(
     private stage: StagePort,
@@ -298,6 +313,12 @@ export class WalkDriver {
       if (s.type === 'fix') {
         await this.stage.compassSpin(s.at!, this.msPerStep);
       } else {
+        if (s.to!.length > MAX_DEPTH || s.mid!.length > MAX_DEPTH) {
+          // the walk would leave the renderable range — stop at the last in-bounds vertex
+          this.playing = false;
+          if (this.onCutoff) this.onCutoff(s.from!);
+          return;
+        }
         await this.stage.movePulse(s.from!, s.mid!, s.to!, this.msPerStep);
         if (myGen !== this.gen) return;
         this.stage.appendTrailEdge(s.from!, s.mid!);
@@ -345,19 +366,33 @@ export class WalkDriver {
    * so synthesizing after an append does not re-expand earlier work.
    * fromIndex = 0 is the whole walk (first synthesize / global case).
    */
-  async straighten(fromIndex = 0): Promise<string[]> {
+  async straighten(fromIndex = 0): Promise<{ geodesic: string[]; cut: boolean }> {
     const t = this.traj;
-    if (!t) return [];
+    if (!t) return { geodesic: [], cut: false };
     const myGen = ++this.gen;
     this.playing = false;
     this.paused = false;
 
     const seg = t.trail.slice(fromIndex);
-    if (seg.length < 2) return seg; // nothing pending (segment is sde 0)
+    if (seg.length < 2) return { geodesic: seg, cut: false }; // nothing pending (sde 0)
 
     const anchorH = fromIndex / 2; // H's frozen before this segment (trail: 2 verts per H)
     const segOwners = t.edgeOwner.slice(fromIndex).map((o) => o - anchorH); // local ordinals
-    const { geodesic: segGeo, events } = reducePath(seg);
+    const { geodesic: segGeoFull, events } = reducePath(seg);
+    const cutIdx = segGeoFull.findIndex((a) => a.length > MAX_DEPTH);
+    const cut = cutIdx !== -1;
+    const segGeo = cut ? segGeoFull.slice(0, cutIdx) : segGeoFull; // truncate to range
+    const segMaxDepth = seg.reduce((m, a) => Math.max(m, a.length), 0);
+
+    // If the geodesic or the meander leaves the renderable range, skip the
+    // (numerically unstable) deep retraction and just trace the in-bounds path.
+    if (cut || segMaxDepth > MAX_DEPTH) {
+      this.stage.setTrailEdges([]);
+      this.stage.drawDeepPath(segGeo);
+      if (segGeo.length >= 2) await this.stage.tracePath(segGeo, 240);
+      return { geodesic: segGeo, cut };
+    }
+
     const fates = computeTokenFates(seg, segOwners, events);
     const segSde = (segGeo.length - 1) / 2;
 
@@ -366,15 +401,15 @@ export class WalkDriver {
     this.scrub.setActive(-1);
     this.scrub.setMeter(fates.hCount, segSde);
     await sleep(300);
-    if (myGen !== this.gen) return segGeo;
+    if (myGen !== this.gen) return { geodesic: segGeo, cut: false };
 
     const work = seg.slice();
     const lobeMs = Math.min(Math.max(this.msPerStep * 0.8, 180), 480);
     for (const ev of fates.events) {
       await this.pauseGate(myGen);
-      if (myGen !== this.gen) return segGeo;
+      if (myGen !== this.gen) return { geodesic: segGeo, cut: false };
       await this.stage.flashLobe(ev.lobe, lobeMs);
-      if (myGen !== this.gen) return segGeo;
+      if (myGen !== this.gen) return { geodesic: segGeo, cut: false };
       work.splice(ev.index, 2);
       this.stage.setTrailEdges(pathEdges(work));
       for (const h of ev.halved) this.scrub.onTokenHalf(h);
@@ -383,7 +418,7 @@ export class WalkDriver {
     }
     // pulse following the synthesized segment, anchor → green endpoint (camera follows)
     await this.stage.tracePath(segGeo, 280);
-    return segGeo;
+    return { geodesic: segGeo, cut: false };
   }
 
   cancel(): void {

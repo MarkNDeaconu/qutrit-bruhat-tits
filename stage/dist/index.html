@@ -4,8 +4,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>The Tree Behind the Gates — qutrit Clifford+R on its Bruhat–Tits tree</title>
-    <script type="module" crossorigin src="./assets/index-C0aWD71A.js"></script>
-    <link rel="stylesheet" crossorigin href="./assets/index-DVzgtv6a.css">
+    <script type="module" crossorigin src="./assets/index-DtmaqfyG.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-hZZ7S_7A.css">
   </head>
   <body>
     <div id="stage"></div>
@@ -28,7 +28,8 @@
       <button id="btn-play" title="play a fresh walk from the origin (Enter / Space)">Play</button>
       <button id="btn-append" title="continue from the green endpoint (A / Shift+Enter)">Append</button>
       <button id="btn-synth" title="snap to origin, draw the shortest path to the green node (G)">Synthesize</button>
-      <button id="btn-random" title="random length-40 word (R)">Random 40</button>
+      <button id="btn-random" title="random length-20 word (R)">Random 20</button>
+      <button id="btn-clifford" title="random Clifford word — H and S only (C)">Clifford</button>
       <button id="btn-matrix" title="paste an exact matrix">Matrix…</button>
       <button id="btn-clear" title="clear trail and timeline">Clear</button>
       <select id="examples" title="curated examples — scenic routes that collapse to a short geodesic">
@@ -40,7 +41,8 @@
         <option value="HRHRHHRHRHHHSSSHHHHHHHHHRHHHRHHSSHHHHHHHHSSSSSSRRSSSSHRHSHHHHHHHHSS">deep spike ⤳ sde 4</option>
         <option value="HSHHHSH">T = HSHHHSH (the hidden monomial, sde 0)</option>
         <option value="H">H (one step)</option>
-        <option value="__random40__">random 40</option>
+        <option value="__random20__">random 20</option>
+        <option value="__clifford__">random Clifford (H, S only)</option>
       </select>
       <label id="speed-label">speed
         <input id="speed" type="range" min="120" max="1200" step="10" value="550" />

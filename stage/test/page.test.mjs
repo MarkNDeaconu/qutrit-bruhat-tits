@@ -120,6 +120,37 @@ try {
   check('append+synthesize builds incrementally (no revert/re-expand)', incrementalOk,
     `"${lastBanner.trim()}"`);
 
+  // 4c. Clifford button (H,S only) loads a walk and stays in range (no cutoff)
+  await page.click('#btn-clear');
+  await page.waitForTimeout(900);
+  await page.click('#btn-clifford');
+  await page.waitForSelector('#scrubber .tok', { timeout: 15000 });
+  const cliffTokens = await page.$$eval('#scrubber .tok', (els) => els.length);
+  check('Clifford button loads a walk', cliffTokens > 0, `${cliffTokens} tokens`);
+
+  // 4d. deep path: synthesizing a high-sde word must cut off cleanly (red marker +
+  //     notice) and NOT glitch — i.e. no uncaught errors and the notice appears
+  await page.click('#btn-clear');
+  await page.waitForTimeout(700);
+  await page.fill('#word', 'SRSRRHHHRRSRSHRHRRRSHRHSRRHRRHHHRHRHSSSSRRRRSSRHSRSHRR'); // sde 9, depth 18
+  await page.click('#btn-play');
+  await page.waitForTimeout(2500);
+  await page.click('#btn-synth');
+  let cutoffShown = false;
+  try {
+    await page.waitForFunction(
+      () => /rendered range|red node/.test(document.querySelector('#caption')?.textContent || ''),
+      { timeout: 30000 },
+    );
+    cutoffShown = true;
+  } catch {
+    /* notice never appeared */
+  }
+  check('deep path cuts off with an out-of-range notice (no glitch)', cutoffShown,
+    ((await page.textContent('#caption')) || '').trim().slice(0, 70));
+  await page.waitForTimeout(1500); // let any (now-bounded) animation settle
+  await page.screenshot({ path: '/tmp/qutrits_cutoff.png', fullPage: false });
+
   // 5. inspector: click the origin card via the API-backed path
   const vertexOk = await page.evaluate(async () => {
     // exercise the transport directly the way the inspector does

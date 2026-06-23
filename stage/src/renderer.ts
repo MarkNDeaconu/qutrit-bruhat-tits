@@ -25,7 +25,7 @@ import {
   poincareSegmentPoints,
 } from './hyperbolic.js';
 import { generateBall, parentOf } from './tree.js';
-import type { StagePort } from './walk.js';
+import { MAX_DEPTH, type StagePort } from './walk.js';
 
 // ---------------------------------------------------------------------------
 
@@ -49,6 +49,7 @@ interface Theme {
   pulse: number;
   flash: number;
   endpoint: number; // green marker for the current walk endpoint
+  cutoff: number; // red marker where a path leaves the renderable range
   additive: boolean;
 }
 
@@ -62,6 +63,7 @@ const DARK: Theme = {
   pulse: 0xfff3c4,
   flash: 0xffffff,
   endpoint: 0x2ee36e, // vivid green
+  cutoff: 0xff3b3b, // red
   additive: true,
 };
 
@@ -75,6 +77,7 @@ const LIGHT: Theme = {
   pulse: 0xa86f00,
   flash: 0x7a5800,
   endpoint: 0x0a8f44, // darker green for light bg
+  cutoff: 0xc81e1e, // darker red for light bg
   additive: false,
 };
 
@@ -145,6 +148,7 @@ export class Renderer implements StagePort {
   private frozenTrailEdges: Array<[string, string]> = []; // synthesized geodesics
   private selectedAddr: string | null = null;
   private endpointAddr: string | null = null;
+  private endpointCutoff = false; // draw the endpoint red (out of range) vs green
 
   onVertexClick: ((addr: string) => void) | null = null;
   onVertexDblClick: ((addr: string) => void) | null = null;
@@ -309,6 +313,7 @@ export class Renderer implements StagePort {
 
   /** Animate the Möbius parameter c along the hyperbolic segment to addr. */
   focusOn(addr: string, durationMs = 700): Promise<void> {
+    if (addr.length > MAX_DEPTH) return Promise.resolve(); // out of range: don't glitch
     const idx = this.ensureVertex(addr);
     const target = this.records[idx].z0;
     const path = poincareSegmentPoints(this.cam.c, target, 64);
@@ -435,6 +440,7 @@ export class Renderer implements StagePort {
   drawDeepPath(addrs: string[]): void {
     let added = false;
     for (const a of addrs) {
+      if (a.length > MAX_DEPTH) continue; // beyond the renderable range
       if (!this.byAddr.has(a)) {
         this.ensureVertex(a);
         added = true;
@@ -443,8 +449,12 @@ export class Renderer implements StagePort {
     if (added) this.redrawEdges(this.maxDepthPresent);
   }
 
+  private inRange(e: [string, string]): boolean {
+    return e[0].length <= MAX_DEPTH && e[1].length <= MAX_DEPTH;
+  }
+
   setTrailEdges(edges: Array<[string, string]>): void {
-    this.trailEdges = edges.slice();
+    this.trailEdges = edges.filter((e) => this.inRange(e));
     this.redrawTrail();
   }
 
@@ -457,11 +467,12 @@ export class Renderer implements StagePort {
   /** Frozen geodesics = the parts already synthesized; they persist across
    *  appends and further synthesizes (never re-expanded). */
   addFrozenEdges(edges: Array<[string, string]>): void {
-    for (const [a, b] of edges) {
+    const inRange = edges.filter((e) => this.inRange(e));
+    for (const [a, b] of inRange) {
       this.ensureVertex(a);
       this.ensureVertex(b);
     }
-    this.frozenTrailEdges.push(...edges);
+    this.frozenTrailEdges.push(...inRange);
     this.redrawTrail();
   }
 
@@ -577,6 +588,7 @@ export class Renderer implements StagePort {
 
   /** Camera follow: refocus if the vertex strays past ~70% of viewport radius. */
   maybeFollow(addr: string): void {
+    if (addr.length > MAX_DEPTH) return; // never centre on an out-of-range vertex
     const idx = this.byAddr.get(addr);
     if (idx === undefined || this.camAnimating) return;
     const rec = this.records[idx];
@@ -728,10 +740,12 @@ export class Renderer implements StagePort {
     this.selectedAddr = addr;
   }
 
-  /** Mark (or clear) the current walk endpoint with a pulsating green node. */
-  setEndpoint(addr: string | null): void {
+  /** Mark (or clear) the current walk endpoint with a pulsating node — green
+   *  normally, red when `cutoff` (the path ran past the renderable range). */
+  setEndpoint(addr: string | null, cutoff = false): void {
     if (addr !== null) this.ensureVertex(addr);
     this.endpointAddr = addr;
+    this.endpointCutoff = cutoff;
   }
 
   get endpoint(): string | null {
@@ -823,7 +837,7 @@ export class Renderer implements StagePort {
         const y = rec.zy * this.R0;
         const base = Math.max(vertexRadius(rec.depth), 5);
         const pulse = 1 + 0.28 * Math.sin((now / 620) * 2 * Math.PI);
-        const c = this.theme.endpoint;
+        const c = this.endpointCutoff ? this.theme.cutoff : this.theme.endpoint;
         g.circle(x, y, base + 2).fill({ color: c, alpha: 0.95 });
         g.circle(x, y, (base + 6) * pulse).stroke({ width: 2.5, color: c, alpha: 0.9 });
         g.circle(x, y, (base + 12) * pulse).stroke({ width: 6, color: c, alpha: 0.18 });
